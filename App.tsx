@@ -1,6 +1,22 @@
+// Fix: Implement the full App.tsx component to create a functional application.
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Cage, HarvestedCage, ReportType, Theme, Notification } from './types';
+import { getAIReport } from './services/geminiService';
+import { 
+    isFirebaseConfigured, 
+    onCagesUpdate,
+    onHarvestedCagesUpdate,
+    onNotificationsUpdate,
+    addCageToFirebase,
+    updateCageInFirebase,
+    deleteCageFromFirebase,
+    addHarvestedCageToFirebase,
+    markNotificationsAsReadInFirebase,
+    addNotificationToFirebase,
+    deleteNotificationsForCageInFirebase,
+    migrateDataToFirebase
+} from './services/firebaseService';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Cage, HarvestedCage, ReportType, Theme } from './types';
 import Header from './components/Header';
 import ReportCenter from './components/ReportCenter';
 import CageGrid from './components/CageGrid';
@@ -10,227 +26,453 @@ import DetailsModal from './components/modals/DetailsModal';
 import UpdateModal from './components/modals/UpdateModal';
 import HarvestModal from './components/modals/HarvestModal';
 import ReportModal from './components/modals/ReportModal';
+import FilterControls from './components/FilterControls';
 import LandingPage from './components/LandingPage';
-import { getAIReport } from './services/geminiService';
+import CageStatusLegend from './components/CageStatusLegend';
+import FinancialDashboard from './components/FinancialDashboard';
+import FirebaseSetup from './components/FirebaseSetup';
+import MigrationBanner from './components/MigrationBanner';
 
-const TARGET_WEIGHT = 500;
-const THEME_STORAGE_KEY = 'thinh-y-crab-farm-theme';
 
-const App: React.FC = () => {
-    const [showDashboard, setShowDashboard] = useState(false);
-    const [cageData, setCageData] = useState<Cage[]>([]);
-    const [harvestedData, setHarvestedData] = useState<HarvestedCage[]>([]);
+// Helper function to get days for sorting
+const getFarmingDays = (startDateString: string): number => {
+    const start = new Date(startDateString);
+    return Math.max(1, Math.floor((new Date().getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+};
+
+function App() {
+    const [cages, setCages] = useState<Cage[]>([]);
+    const [harvestedCages, setHarvestedCages] = useState<HarvestedCage[]>([]);
+    const [theme, setTheme] = useState<Theme>('blue');
+    const [appEntered, setAppEntered] = useState(false);
+    const [currentView, setCurrentView] = useState<'cages' | 'dashboard'>('cages');
+    const [isLoading, setIsLoading] = useState(true);
+    
+    // Modal states
+    const [activeModal, setActiveModal] = useState<string | null>(null);
+    const [selectedCage, setSelectedCage] = useState<Cage | null>(null);
     const [selectedCages, setSelectedCages] = useState<Set<string>>(new Set());
     
-    const [activeCage, setActiveCage] = useState<Cage | null>(null);
-    const [isUpdateModalOpen, setUpdateModalOpen] = useState(false);
-    const [isHarvestModalOpen, setHarvestModalOpen] = useState(false);
-    const [isReportModalOpen, setReportModalOpen] = useState(false);
-    const [reportContent, setReportContent] = useState({ title: '', content: '' });
-    const [isReportLoading, setReportLoading] = useState(false);
-    const [theme, setTheme] = useState<Theme>('blue');
+    // Report states
+    const [reportData, setReportData] = useState<{title: string, content: string} | null>(null);
+    const [isReportLoading, setIsReportLoading] = useState(false);
+    
+    // Filter & Sort states
+    const [searchTerm, setSearchTerm] = useState('');
+    const [sortKey, setSortKey] = useState('id');
+    
+    // Notification state
+    const [notifications, setNotifications] = useState<Notification[]>([]);
 
-    const generateInitialData = () => {
-        const initialCages = Array.from({ length: 50 }, (_, i) => {
-            const farmingDays = Math.floor(Math.random() * 40);
-            const startDate = new Date();
-            startDate.setDate(startDate.getDate() - farmingDays);
-            const initialWeight = Math.floor(Math.random() * 51) + 50;
-            const growthRatePerDay = Math.random() * 3 + 2;
-            const currentWeight = Math.round(initialWeight + (farmingDays * growthRatePerDay));
-            const seedCost = Math.floor(Math.random() * 10000) + 10000;
-            const feedCost = Math.floor(currentWeight * 150);
-            const medicineCost = Math.random() > 0.8 ? Math.floor(Math.random() * 5000) + 2000 : 0;
-            const hasAIAlert = Math.random() > 0.9;
+    // Migration State
+    const [localDataExists, setLocalDataExists] = useState(false);
+    const [migrationComplete, setMigrationComplete] = useState(false);
 
-            return {
-                id: (i + 1).toString().padStart(3, '0'),
-                startDate: startDate.toISOString(),
-                initialWeight,
-                currentWeight,
-                progress: Math.min(100, Math.round((currentWeight / TARGET_WEIGHT) * 100)),
-                costs: { seed: seedCost, feed: feedCost, medicine: medicineCost },
-                growthHistory: Array.from({ length: 10 }, (_, j) => Math.floor(initialWeight + j * (farmingDays / 10) * growthRatePerDay + Math.random() * 20)),
-                log: [{ date: startDate.toISOString(), message: `Thả giống với trọng lượng ${initialWeight}g.` }],
-                aiAlert: hasAIAlert,
-                deadCrabCount: Math.random() > 0.95 ? 1 : 0
-            };
-        });
-        setCageData(initialCages);
-    };
 
     useEffect(() => {
-        generateInitialData();
-        const savedTheme = localStorage.getItem(THEME_STORAGE_KEY) as Theme | null;
-        if (savedTheme && ['blue', 'green', 'orange'].includes(savedTheme)) {
-            setTheme(savedTheme);
+        // Check for local data for migration banner
+        const localCages = localStorage.getItem('crab-farm-cages');
+        const migrationDone = localStorage.getItem('firebase-migration-complete');
+        if (localCages && !migrationDone) {
+            setLocalDataExists(true);
         }
     }, []);
 
+    // Load theme from localStorage on initial render
     useEffect(() => {
-        const root = document.documentElement;
-        root.classList.remove('theme-blue', 'theme-green', 'theme-orange');
-        root.classList.add(`theme-${theme}`);
-        localStorage.setItem(THEME_STORAGE_KEY, theme);
-
-        const themeColorMeta = document.getElementById('theme-color-meta');
-        if (themeColorMeta) {
-            const newColor = getComputedStyle(root).getPropertyValue('--theme-color-hex').trim();
-            if (newColor) {
-                themeColorMeta.setAttribute('content', newColor);
+        try {
+            const storedTheme = localStorage.getItem('crab-farm-theme');
+            if (storedTheme && ['blue', 'green', 'orange'].includes(storedTheme)) {
+                setTheme(storedTheme as Theme);
             }
+        } catch (error) {
+            console.error("Failed to load theme from localStorage", error);
+        }
+    }, []);
+
+    // Save theme to localStorage whenever it changes
+    useEffect(() => {
+        try {
+            localStorage.setItem('crab-farm-theme', theme);
+        } catch (error) {
+            console.error("Failed to save theme to localStorage", error);
         }
     }, [theme]);
-
-    const handleAddCage = () => {
-        const lastId = cageData.length > 0 ? Math.max(...cageData.map(c => parseInt(c.id))) : 0;
-        const newId = (lastId + 1).toString().padStart(3, '0');
-        const initialWeight = Math.floor(Math.random() * 51) + 50;
-        const newCage: Cage = {
-            id: newId,
-            startDate: new Date().toISOString(),
-            initialWeight,
-            currentWeight: initialWeight,
-            progress: Math.min(100, Math.round((initialWeight / TARGET_WEIGHT) * 100)),
-            costs: { seed: Math.floor(Math.random() * 10000) + 10000, feed: 0, medicine: 0 },
-            growthHistory: [initialWeight],
-            log: [{ date: new Date().toISOString(), message: `Thả giống với trọng lượng ${initialWeight}g.` }],
-            aiAlert: false,
-            deadCrabCount: 0
-        };
-        setCageData(prev => [...prev, newCage]);
-    };
     
-    const handleSelectCage = (id: string, isSelected: boolean) => {
-        const newSelection = new Set(selectedCages);
-        if (isSelected) {
-            newSelection.add(id);
-        } else {
-            newSelection.delete(id);
+    // Set up Firebase listeners
+    useEffect(() => {
+        if (!isFirebaseConfigured) {
+            setIsLoading(false);
+            return;
         }
-        setSelectedCages(newSelection);
-    };
 
-    const handleBulkFeed = () => {
-        setCageData(prevData =>
-            prevData.map(cage => {
-                if (selectedCages.has(cage.id)) {
-                    return {
-                        ...cage,
-                        log: [...cage.log, { date: new Date().toISOString(), message: "Đánh dấu đã cho ăn (hàng loạt)." }]
-                    };
+        const unsubCages = onCagesUpdate(setCages, () => setIsLoading(false));
+        const unsubHarvested = onHarvestedCagesUpdate(setHarvestedCages);
+        const unsubNotifications = onNotificationsUpdate(setNotifications);
+
+        return () => {
+            unsubCages();
+            unsubHarvested();
+            unsubNotifications();
+        };
+    }, []);
+
+
+    // Generate notifications based on cage status
+    useEffect(() => {
+        if (!isFirebaseConfigured || isLoading) return;
+
+        const processNotifications = async () => {
+            const now = new Date().toISOString();
+
+            for (const cage of cages) {
+                // Check for AI Alerts
+                if (cage.aiAlert) {
+                    const existing = notifications.some(n => n.cageId === cage.id && n.type === 'alert');
+                    if (!existing) {
+                        await addNotificationToFirebase({
+                            id: `alert-${cage.id}-${Date.now()}`,
+                            type: 'alert',
+                            message: `Lồng ${cage.id} có cảnh báo AI. Cần kiểm tra ngay!`,
+                            cageId: cage.id,
+                            timestamp: now,
+                            read: false
+                        });
+                    }
                 }
-                return cage;
-            })
-        );
-        alert(`${selectedCages.size} lồng đã được đánh dấu cho ăn.`);
-        setSelectedCages(new Set());
+
+                // Check for Harvest Readiness
+                if (cage.progress >= 95) {
+                    const existing = notifications.some(n => n.cageId === cage.id && n.type === 'harvest');
+                    if (!existing) {
+                        await addNotificationToFirebase({
+                            id: `harvest-${cage.id}-${Date.now()}`,
+                            type: 'harvest',
+                            message: `Lồng ${cage.id} đã sẵn sàng để thu hoạch.`,
+                            cageId: cage.id,
+                            timestamp: now,
+                            read: false
+                        });
+                    }
+                }
+            }
+        };
+
+        processNotifications();
+
+    }, [cages, isLoading, notifications]); // Rerun when cages or loading state changes
+
+
+    // Apply theme colors as CSS variables
+    useEffect(() => {
+        const root = document.documentElement;
+        const colors = {
+            blue: { 100: '#DBEAFE', 500: '#3B82F6', 600: '#2563EB', 800: '#1E40AF' },
+            green: { 100: '#D1FAE5', 500: '#10B981', 600: '#059669', 800: '#065F46' },
+            orange: { 100: '#FFEDD5', 500: '#F97316', 600: '#EA580C', 800: '#9A3412' }
+        };
+        const selectedTheme = colors[theme];
+        root.style.setProperty('--color-primary-100', selectedTheme[100]);
+        root.style.setProperty('--color-primary-500', selectedTheme[500]);
+        root.style.setProperty('--color-primary-600', selectedTheme[600]);
+        root.style.setProperty('--color-primary-800', selectedTheme[800]);
+    }, [theme]);
+
+    const handleOpenModal = (modalName: string, cage?: Cage) => {
+        setSelectedCage(cage || null);
+        setActiveModal(modalName);
     };
     
-    const handleOpenDetails = (cage: Cage) => setActiveCage(cage);
-    const handleCloseDetails = () => setActiveCage(null);
+    const handleCloseModals = useCallback(() => {
+        setActiveModal(null);
+        setSelectedCage(null);
+    }, []);
     
-    const handleOpenUpdateModal = () => {
-        setUpdateModalOpen(true);
-        handleCloseDetails();
+    const handleAddCage = async (newCage: Cage) => {
+        const cageWithLog: Cage = {
+            ...newCage,
+            log: [{
+                date: newCage.startDate,
+                type: 'creation',
+                details: `Bắt đầu nuôi với trọng lượng ${newCage.initialWeight}g.`,
+                meta: { weight: newCage.initialWeight, cost: newCage.costs.seed }
+            }]
+        };
+        await addCageToFirebase(cageWithLog);
+        handleCloseModals();
     };
 
-    const handleUpdateCage = (updatedCage: Cage) => {
-        setCageData(cages => cages.map(c => c.id === updatedCage.id ? updatedCage : c));
-        setUpdateModalOpen(false);
+    const handleUpdateCage = async (updatedCage: Cage) => {
+        await updateCageInFirebase(updatedCage.id, updatedCage);
+        handleCloseModals();
     };
     
-    const handleOpenHarvestModal = () => {
-        setHarvestModalOpen(true);
-        handleCloseDetails();
-    };
-
-    const handleHarvestCage = (finalWeight: number, pricePerKg: number) => {
-        if (!activeCage) return;
-        
-        const totalCost = activeCage.costs.seed + activeCage.costs.feed + activeCage.costs.medicine;
+    const handleHarvest = async (finalWeight: number, pricePerKg: number) => {
+        if (!selectedCage) return;
+        const cageToHarvest = selectedCage;
+        const totalCost = cageToHarvest.costs.seed + cageToHarvest.costs.feed + cageToHarvest.costs.medicine;
         const revenue = (finalWeight / 1000) * pricePerKg;
         const profit = revenue - totalCost;
-
+        
         const newHarvestedCage: HarvestedCage = {
-            ...activeCage,
+            id: cageToHarvest.id,
+            harvestDate: new Date().toISOString(),
             finalWeight,
-            pricePerKg,
             revenue,
             profit,
-            harvestDate: new Date().toISOString()
+            totalCost,
+            costs: cageToHarvest.costs,
         };
         
-        setHarvestedData(prev => [...prev, newHarvestedCage]);
-        setCageData(prev => prev.filter(c => c.id !== activeCage.id));
-        setHarvestModalOpen(false);
-        setActiveCage(null);
+        await addHarvestedCageToFirebase(newHarvestedCage);
+        await deleteCageFromFirebase(cageToHarvest.id);
+        await deleteNotificationsForCageInFirebase(cageToHarvest.id);
+        
+        handleCloseModals();
     };
 
-    const handleDeleteCage = (id: string) => {
-        setCageData(prev => prev.filter(c => c.id !== id));
-        handleCloseDetails();
+    const handleDeleteCage = async (id: string) => {
+        await deleteCageFromFirebase(id);
+        await deleteNotificationsForCageInFirebase(id);
+        handleCloseModals();
     };
 
-    const handleGenerateReport = useCallback(async (reportType: ReportType) => {
-        setReportLoading(true);
-        setReportModalOpen(true);
-        const report = await getAIReport(reportType, cageData, harvestedData);
-        setReportContent(report);
-        setReportLoading(false);
-    }, [cageData, harvestedData]);
+    const handleSelectChange = (id: string, isSelected: boolean) => {
+        setSelectedCages(prev => {
+            const newSet = new Set(prev);
+            if (isSelected) newSet.add(id);
+            else newSet.delete(id);
+            return newSet;
+        });
+    };
 
-    if (!showDashboard) {
-        return <LandingPage onEnter={() => setShowDashboard(true)} />;
+    const handleBulkFeed = async () => {
+        const now = new Date().toISOString();
+        const feedCost = 15000; // Example cost
+        
+        const updates: Promise<void>[] = [];
+        cages.forEach(cage => {
+            if (selectedCages.has(cage.id)) {
+                const newFeedEntry = {
+                    date: now,
+                    feedType: 'Thức ăn tổng hợp (hàng loạt)',
+                    weight: 100, // Example weight
+                    cost: feedCost
+                };
+                const updatedCage = {
+                    ...cage,
+                    costs: { ...cage.costs, feed: cage.costs.feed + feedCost },
+                    log: [...cage.log, { date: now, type: 'feeding' as const, details: `Đã cho ăn hàng loạt. Chi phí ${feedCost.toLocaleString('vi-VN')} VND.`, meta: { cost: feedCost, weight: 100 } }],
+                    feedHistory: [...cage.feedHistory, newFeedEntry]
+                };
+                updates.push(updateCageInFirebase(cage.id, updatedCage));
+            }
+        });
+
+        await Promise.all(updates);
+        setSelectedCages(new Set());
+    };
+
+    const handleGenerateReport = async (reportType: ReportType) => {
+        setIsReportLoading(true);
+        setActiveModal('report');
+        const result = await getAIReport(reportType, cages, harvestedCages);
+        setReportData(result);
+        setIsReportLoading(false);
+    };
+
+    const handleMarkNotificationsAsRead = useCallback(async () => {
+        await markNotificationsAsReadInFirebase();
+    }, []);
+
+    const handleRunMigration = async () => {
+        if (!window.confirm("Bạn có chắc chắn muốn chuyển dữ liệu từ máy này lên đám mây không? Hành động này không thể hoàn tác.")) {
+            return;
+        }
+        try {
+            const localCagesJSON = localStorage.getItem('crab-farm-cages');
+            const localHarvestedJSON = localStorage.getItem('crab-farm-harvested');
+            
+            const localCages = localCagesJSON ? JSON.parse(localCagesJSON) : [];
+            const localHarvested = localHarvestedJSON ? JSON.parse(localHarvestedJSON) : [];
+
+            await migrateDataToFirebase(localCages, localHarvested);
+
+            localStorage.setItem('firebase-migration-complete', 'true');
+            setLocalDataExists(false); // Hide banner
+            setMigrationComplete(true); // Optional: show success message
+            alert("Chuyển dữ liệu thành công! Dữ liệu của bạn giờ đã an toàn trên đám mây.");
+            window.location.reload(); // Reload to fetch fresh data from Firebase
+        } catch (error) {
+            console.error("Migration failed: ", error);
+            alert("Đã có lỗi xảy ra trong quá trình chuyển đổi. Vui lòng thử lại.");
+        }
+    };
+    
+    const filteredAndSortedCages = useMemo(() => {
+        let processedCages = [...cages];
+        if (searchTerm) {
+            processedCages = processedCages.filter(c => c.id.toLowerCase().includes(searchTerm.toLowerCase()));
+        }
+        switch(sortKey) {
+            case 'progress_desc': processedCages.sort((a, b) => b.progress - a.progress); break;
+            case 'progress_asc': processedCages.sort((a, b) => a.progress - b.progress); break;
+            case 'days_desc': processedCages.sort((a, b) => getFarmingDays(b.startDate) - getFarmingDays(a.startDate)); break;
+            case 'days_asc': processedCages.sort((a, b) => getFarmingDays(a.startDate) - getFarmingDays(b.startDate)); break;
+            case 'id': default: processedCages.sort((a, b) => a.id.localeCompare(b.id)); break;
+        }
+        return processedCages;
+    }, [cages, searchTerm, sortKey]);
+
+    if (!isFirebaseConfigured) {
+        return <FirebaseSetup />;
+    }
+
+    if (!appEntered) {
+        return <LandingPage onEnter={() => setAppEntered(true)} />;
+    }
+
+    if (isLoading) {
+        return (
+            <div className="flex justify-center items-center min-h-screen bg-gray-50">
+                <div className="flex flex-col items-center">
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary-500"></div>
+                    <p className="mt-4 text-gray-600">Đang tải dữ liệu trang trại...</p>
+                </div>
+            </div>
+        );
     }
 
     return (
-        <div className="container mx-auto p-4 sm:p-6 lg:p-8">
-            <Header onAddCage={handleAddCage} theme={theme} setTheme={setTheme} />
-            <ReportCenter onGenerateReport={handleGenerateReport} />
-            <CageGrid cages={cageData} onCardClick={handleOpenDetails} onSelectChange={handleSelectCage} selectedCages={selectedCages} />
-            
-            <BulkActionBar selectedCount={selectedCages.size} onFeed={handleBulkFeed} />
-            <AIChatWidget allCages={cageData} harvestedCages={harvestedData} />
-            
-            {activeCage && (
+        <div className="bg-gray-50 min-h-screen font-sans">
+            <div className="container mx-auto p-4 sm:p-6">
+                {localDataExists && <MigrationBanner onMigrate={handleRunMigration} />}
+                <Header 
+                    onAddCage={() => setActiveModal('add')} 
+                    theme={theme} 
+                    setTheme={setTheme} 
+                    notifications={notifications}
+                    onMarkAsRead={handleMarkNotificationsAsRead}
+                    currentView={currentView}
+                    onNavigate={setCurrentView}
+                />
+                
+                {currentView === 'cages' && (
+                    <>
+                        <ReportCenter onGenerateReport={handleGenerateReport} />
+                        <FilterControls 
+                            onSearch={setSearchTerm}
+                            onSortChange={setSortKey}
+                            searchTerm={searchTerm}
+                            sortKey={sortKey}
+                        />
+                        <CageStatusLegend />
+                        <CageGrid 
+                            cages={filteredAndSortedCages}
+                            onCardClick={(cage) => handleOpenModal('details', cage)}
+                            onSelectChange={handleSelectChange}
+                            selectedCages={selectedCages}
+                        />
+                    </>
+                )}
+                
+                {currentView === 'dashboard' && (
+                    <FinancialDashboard cages={cages} harvestedCages={harvestedCages} />
+                )}
+
+            </div>
+            {currentView === 'cages' && <BulkActionBar selectedCount={selectedCages.size} onFeed={handleBulkFeed} />}
+            <AIChatWidget allCages={cages} harvestedCages={harvestedCages} />
+
+            {/* Modals */}
+            {activeModal === 'add' && <AddCageModal onClose={handleCloseModals} onSave={handleAddCage} existingIds={cages.map(c => c.id)}/>}
+            {activeModal === 'details' && selectedCage && (
                 <DetailsModal 
-                    cage={activeCage} 
-                    onClose={handleCloseDetails} 
-                    onUpdate={handleOpenUpdateModal}
-                    onHarvest={handleOpenHarvestModal}
+                    cage={selectedCage} 
+                    onClose={handleCloseModals}
+                    onUpdate={() => handleOpenModal('update', selectedCage)}
+                    onHarvest={() => handleOpenModal('harvest', selectedCage)}
                     onDelete={handleDeleteCage}
-                    targetWeight={TARGET_WEIGHT}
+                    targetWeight={500}
                 />
             )}
-            
-            {isUpdateModalOpen && activeCage && (
-                <UpdateModal 
-                    cage={activeCage} 
-                    onClose={() => setUpdateModalOpen(false)} 
-                    onSave={handleUpdateCage} 
-                />
+            {activeModal === 'update' && selectedCage && (
+                <UpdateModal cage={selectedCage} onClose={handleCloseModals} onSave={handleUpdateCage} />
             )}
-
-            {isHarvestModalOpen && activeCage && (
-                <HarvestModal 
-                    cage={activeCage} 
-                    onClose={() => setHarvestModalOpen(false)} 
-                    onHarvest={handleHarvestCage} 
-                />
+            {activeModal === 'harvest' && selectedCage && (
+                <HarvestModal cage={selectedCage} onClose={handleCloseModals} onHarvest={handleHarvest} />
             )}
-
-            {isReportModalOpen && (
+            {activeModal === 'report' && reportData && (
                 <ReportModal
-                    title={reportContent.title}
-                    content={reportContent.content}
+                    title={reportData.title}
+                    content={reportData.content}
                     isLoading={isReportLoading}
-                    onClose={() => setReportModalOpen(false)}
+                    onClose={() => setActiveModal(null)}
                 />
             )}
-
         </div>
     );
-};
+}
+
+// A simple AddCageModal needs to be defined for the app to compile
+const AddCageModal: React.FC<{onClose: () => void; onSave: (cage: Cage) => void; existingIds: string[]}> = ({onClose, onSave, existingIds}) => {
+    const [id, setId] = useState('');
+    const [weight, setWeight] = useState('');
+    const [cost, setCost] = useState('');
+    const [error, setError] = useState('');
+    
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (existingIds.includes(id.toUpperCase())) {
+            setError(`ID "${id.toUpperCase()}" đã tồn tại.`);
+            return;
+        }
+        if (!id.trim() || !weight || !cost) {
+            setError('Vui lòng điền đầy đủ thông tin.');
+            return;
+        }
+        const newCage: Cage = {
+            id: id.toUpperCase(),
+            startDate: new Date().toISOString(),
+            initialWeight: parseInt(weight),
+            currentWeight: parseInt(weight),
+            deadCrabCount: 0,
+            costs: { seed: parseInt(cost), feed: 0, medicine: 0 },
+            growthHistory: [parseInt(weight)],
+            aiAlert: false,
+            progress: Math.min(100, Math.round((parseInt(weight) / 500) * 100)),
+            log: [], // The log is now added in App.tsx's handleAddCage
+            feedHistory: [],
+        };
+        onSave(newCage);
+    }
+    
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md">
+                <h2 className="text-xl font-bold mb-4">Thêm Lồng Mới</h2>
+                {error && <p className="text-red-500 text-sm mb-3">{error}</p>}
+                <form onSubmit={handleSubmit} className="space-y-4">
+                     <div>
+                        <label className="block text-sm font-medium text-gray-700">ID Lồng (ví dụ: A01)</label>
+                        <input type="text" value={id} onChange={e => { setId(e.target.value); setError(''); }} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required />
+                    </div>
+                     <div>
+                        <label className="block text-sm font-medium text-gray-700">Trọng lượng ban đầu (gam)</label>
+                        <input type="number" value={weight} onChange={e => setWeight(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required />
+                    </div>
+                     <div>
+                        <label className="block text-sm font-medium text-gray-700">Chi phí giống (VND)</label>
+                        <input type="number" value={cost} onChange={e => setCost(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required />
+                    </div>
+                    <div className="flex justify-end space-x-3 pt-4">
+                        <button type="button" onClick={onClose} className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-4 rounded-lg">Hủy</button>
+                        <button type="submit" className="bg-primary-500 hover:bg-primary-600 text-white font-semibold py-2 px-4 rounded-lg">Lưu</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    )
+}
 
 export default App;

@@ -13,9 +13,12 @@ const CageCard: React.FC<CageCardProps> = ({ cage, onClick, onSelectChange, isSe
     const getFarmingInfo = (startDateString: string) => {
         const start = new Date(startDateString);
         const diffDays = Math.max(1, Math.floor((new Date().getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
-        let colorClass = 'bg-orange-400';
-        if (diffDays < 20) colorClass = 'bg-green-500'; // Young
-        else if (diffDays > 35) colorClass = 'bg-red-500'; // Old
+        let colorClass = 'bg-gray-400'; // Default for < 10 days
+        if (diffDays >= 40) colorClass = 'bg-red-500';
+        else if (diffDays >= 30) colorClass = 'bg-green-500';
+        else if (diffDays >= 20) colorClass = 'bg-yellow-400';
+        else if (diffDays >= 10) colorClass = 'bg-purple-500';
+
         return { days: diffDays, color: colorClass };
     };
 

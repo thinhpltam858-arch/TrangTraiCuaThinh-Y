@@ -1,7 +1,18 @@
+// Fix: Create the `types.ts` file to provide shared type definitions.
+export type LogEntryType = 'creation' | 'update' | 'feeding' | 'medicine' | 'death' | 'note' | 'harvest';
 
 export interface LogEntry {
-  date: string;
-  message: string;
+    date: string;
+    type: LogEntryType;
+    details: string; // e.g., "Trọng lượng mới: 250g" or "Chi phí: 15,000 VND"
+    meta?: Record<string, any>; // For extra structured data, e.g., { weight: 250, cost: 15000 }
+}
+
+export interface FeedHistoryEntry {
+    date: string;
+    feedType: string;
+    weight: number;
+    cost: number;
 }
 
 export interface Cage {
@@ -9,29 +20,31 @@ export interface Cage {
   startDate: string;
   initialWeight: number;
   currentWeight: number;
-  progress: number;
+  deadCrabCount: number;
   costs: {
     seed: number;
     feed: number;
     medicine: number;
   };
   growthHistory: number[];
-  log: LogEntry[];
   aiAlert: boolean;
-  deadCrabCount: number;
+  progress: number;
+  log: LogEntry[];
+  feedHistory: FeedHistoryEntry[];
 }
 
-export interface HarvestedCage extends Cage {
-  finalWeight: number;
-  pricePerKg: number;
-  revenue: number;
-  profit: number;
+export interface HarvestedCage {
+  id: string;
   harvestDate: string;
-}
-
-export interface ChatMessage {
-  sender: 'user' | 'ai';
-  text: string;
+  finalWeight: number;
+  profit: number;
+  revenue: number;
+  totalCost: number;
+  costs: {
+    seed: number;
+    feed: number;
+    medicine: number;
+  };
 }
 
 export enum ReportType {
@@ -42,12 +55,29 @@ export enum ReportType {
     Inventory = 'inventory'
 }
 
+export interface AIHealthReport {
+    healthStatus: 'KHỎE MẠNH' | 'CẦN CHÚ Ý' | 'NGUY CƠ CAO';
+    statusColor: 'green' | 'yellow' | 'red';
+    summary: string;
+    keyObservations: {
+        text: string;
+        isPositive: boolean;
+    }[];
+    recommendation: string;
+}
+
 export type Theme = 'blue' | 'green' | 'orange';
 
-export interface AIHealthReport {
-  healthStatus: 'KHỎE MẠNH' | 'CẦN CHÚ Ý' | 'NGUY CƠ CAO';
-  statusColor: 'green' | 'yellow' | 'red';
-  summary: string;
-  keyObservations: { text: string; isPositive: boolean }[];
-  recommendation: string;
+export interface ChatMessage {
+  sender: 'user' | 'ai';
+  text: string;
+}
+
+export interface Notification {
+  id: string;
+  type: 'alert' | 'harvest';
+  message: string;
+  cageId: string;
+  timestamp: string;
+  read: boolean;
 }

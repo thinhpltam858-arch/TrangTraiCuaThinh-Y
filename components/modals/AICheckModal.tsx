@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import Modal from '../ui/Modal';
 import { AIHealthReport } from '../../types';
@@ -6,6 +7,8 @@ import { AIHealthReport } from '../../types';
 interface AICheckModalProps {
     onClose: () => void;
     fetchAnalysis: () => Promise<AIHealthReport>;
+    isEmbedded?: boolean;
+    onRerun?: () => void;
 }
 
 const statusStyles = {
@@ -60,12 +63,67 @@ const ObservationItem: React.FC<{ text: string, isPositive: boolean }> = ({ text
     );
 }
 
-const AICheckModal: React.FC<AICheckModalProps> = ({ onClose, fetchAnalysis }) => {
+const AICheckContent: React.FC<{analysisResult: AIHealthReport | null, isLoading: boolean, onRerun?: () => void, isEmbedded?: boolean, onClose: () => void}> = ({analysisResult, isLoading, onRerun, isEmbedded, onClose}) => {
+    if (isLoading || !analysisResult) {
+        return <LoadingSkeleton />;
+    }
+
+    const currentStatusStyle = statusStyles[analysisResult.statusColor];
+
+    return (
+         <div>
+            <div className={`p-4 mb-4 border rounded-lg flex items-center space-x-3 ${currentStatusStyle.banner}`}>
+                <div className="flex-shrink-0">{currentStatusStyle.icon}</div>
+                <div className="font-semibold text-lg">{analysisResult.healthStatus}</div>
+            </div>
+            
+            <p className="text-center text-gray-600 mb-6">{analysisResult.summary}</p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-t pt-6">
+                {/* Key Observations */}
+                <div>
+                    <h3 className="font-semibold text-gray-700 mb-3">Quan sát chính</h3>
+                    <ul className="space-y-2.5">
+                        {analysisResult.keyObservations.map((obs, index) => (
+                            <ObservationItem key={index} text={obs.text} isPositive={obs.isPositive} />
+                        ))}
+                    </ul>
+                </div>
+                {/* Recommendation */}
+                <div className="bg-primary-50 p-4 rounded-lg border border-primary-100">
+                    <h3 className="font-semibold text-primary-800 mb-2 flex items-center space-x-2">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+                        <span>Hành động Đề xuất</span>
+                    </h3>
+                    <p className="text-sm text-primary-700">{analysisResult.recommendation}</p>
+                </div>
+            </div>
+
+            <div className="mt-8 text-center flex justify-center space-x-4">
+                {isEmbedded ? (
+                    onRerun && (
+                        <button onClick={onRerun} className="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2.5 px-6 rounded-lg transition-colors shadow hover:shadow-md text-sm">
+                            Phân tích lại
+                        </button>
+                    )
+                ) : (
+                    <button onClick={onClose} className="bg-primary-500 hover:bg-primary-600 text-white font-semibold py-2.5 px-8 rounded-lg transition-colors shadow hover:shadow-md">
+                        Đã hiểu
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+};
+
+
+const AICheckModal: React.FC<AICheckModalProps> = ({ onClose, fetchAnalysis, isEmbedded = false, onRerun }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [analysisResult, setAnalysisResult] = useState<AIHealthReport | null>(null);
 
     useEffect(() => {
         const getAnalysis = async () => {
+            setIsLoading(true);
             const result = await fetchAnalysis();
             setAnalysisResult(result);
             setIsLoading(false);
@@ -73,49 +131,14 @@ const AICheckModal: React.FC<AICheckModalProps> = ({ onClose, fetchAnalysis }) =
         getAnalysis();
     }, [fetchAnalysis]);
 
-    const currentStatusStyle = analysisResult ? statusStyles[analysisResult.statusColor] : statusStyles.yellow;
+    if (isEmbedded) {
+        return <AICheckContent analysisResult={analysisResult} isLoading={isLoading} onRerun={onRerun} isEmbedded={isEmbedded} onClose={onClose}/>
+    }
 
     return (
         <Modal isOpen={true} onClose={onClose} maxWidthClass="max-w-xl">
             <h2 className="text-xl font-bold text-center mb-6 text-gray-800">Báo cáo Sức khỏe AI</h2>
-            {isLoading || !analysisResult ? (
-                <LoadingSkeleton />
-            ) : (
-                <div>
-                    <div className={`p-4 mb-4 border rounded-lg flex items-center space-x-3 ${currentStatusStyle.banner}`}>
-                        <div className="flex-shrink-0">{currentStatusStyle.icon}</div>
-                        <div className="font-semibold text-lg">{analysisResult.healthStatus}</div>
-                    </div>
-                    
-                    <p className="text-center text-gray-600 mb-6">{analysisResult.summary}</p>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-t pt-6">
-                        {/* Key Observations */}
-                        <div>
-                            <h3 className="font-semibold text-gray-700 mb-3">Quan sát chính</h3>
-                            <ul className="space-y-2.5">
-                                {analysisResult.keyObservations.map((obs, index) => (
-                                    <ObservationItem key={index} text={obs.text} isPositive={obs.isPositive} />
-                                ))}
-                            </ul>
-                        </div>
-                        {/* Recommendation */}
-                        <div className="bg-primary-50 p-4 rounded-lg border border-primary-100">
-                            <h3 className="font-semibold text-primary-800 mb-2 flex items-center space-x-2">
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
-                                <span>Hành động Đề xuất</span>
-                            </h3>
-                            <p className="text-sm text-primary-700">{analysisResult.recommendation}</p>
-                        </div>
-                    </div>
-
-                    <div className="mt-8 text-center">
-                        <button onClick={onClose} className="bg-primary-500 hover:bg-primary-600 text-white font-semibold py-2.5 px-8 rounded-lg transition-colors shadow hover:shadow-md">
-                            Đã hiểu
-                        </button>
-                    </div>
-                </div>
-            )}
+            <AICheckContent analysisResult={analysisResult} isLoading={isLoading} onRerun={onRerun} isEmbedded={isEmbedded} onClose={onClose} />
         </Modal>
     );
 };
