@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trang Trại Nuôi Cua Thịnh Ý</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta id="theme-color-meta" name="theme-color" content="#3b82f6"/>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --color-primary-100: #dbeafe; /* blue-100 */
+            --color-primary-500: #3b82f6; /* blue-500 */
+            --color-primary-600: #2563eb; /* blue-600 */
+            --theme-color-hex: #3b82f6;
+        }
+        .theme-green {
+            --color-primary-100: #d1fae5; /* green-100 */
+            --color-primary-500: #10b981; /* green-500 */
+            --color-primary-600: #059669; /* green-600 */
+            --theme-color-hex: #10b981;
+        }
+        .theme-orange {
+            --color-primary-100: #ffedd5; /* orange-100 */
+            --color-primary-500: #f97316; /* orange-500 */
+            --color-primary-600: #ea580c; /* orange-600 */
+            --theme-color-hex: #f97316;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f4f8;
+        }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #888; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+        .progress-ring__circle {
+            transition: stroke-dashoffset 0.5s ease-out, stroke 0.3s ease;
+            transform: rotate(-90deg);
+            transform-origin: 50% 50%;
+        }
+        .modal {
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+        .modal-content {
+            transition: transform 0.3s ease;
+        }
+        .bulk-action-bar, .ai-chat-widget {
+            transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out;
+        }
+        /* Styles for AI Chat Markdown */
+        .ai-chat-bubble .prose {
+            font-size: 0.875rem;
+            color: inherit;
+        }
+        .ai-chat-bubble .prose table {
+            width: 100%;
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+            border-collapse: collapse;
+        }
+        .ai-chat-bubble .prose th, .ai-chat-bubble .prose td {
+            border: 1px solid #e5e7eb;
+            padding: 0.3rem 0.6rem;
+        }
+        .ai-chat-bubble .prose th {
+            background-color: #f9fafb;
+            font-weight: 600;
+        }
+        .ai-chat-bubble .prose ul {
+            list-style-position: inside;
+            padding-left: 0.5rem;
+        }
+        .ai-chat-bubble .prose strong {
+            color: inherit;
+        }
+    </style>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: {
+              100: 'var(--color-primary-100)',
+              500: 'var(--color-primary-500)',
+              600: 'var(--color-primary-600)',
+            }
+          }
+        }
+      }
+    }
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.1.1",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.1.1/",
+    "react/": "https://aistudiocdn.com/react@^19.1.1/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.20.0",
+    "recharts": "https://aistudiocdn.com/recharts@^3.2.1",
+    "react-markdown": "https://aistudiocdn.com/react-markdown@^9.0.1",
+    "remark-gfm": "https://aistudiocdn.com/remark-gfm@^4.0.0"
+  }
+}
+</script>
+</head>
+<body class="antialiased text-gray-800">
+    <div id="root"></div>
+</body>
+</html>
