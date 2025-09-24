@@ -1,68 +1,90 @@
-import { initializeApp } from 'firebase/app';
-import { 
-    getFirestore, 
-    collection, 
-    onSnapshot,
-    doc,
-    setDoc,
-    updateDoc,
-    deleteDoc,
-    writeBatch,
-    query,
-    orderBy,
-    where
-} from 'firebase/firestore';
-import { Cage, HarvestedCage, Notification } from '../types';
+// Fix: Use Firebase v8 compatible imports
+import firebase from 'firebase/app';
+import 'firebase/auth';
+import 'firebase/firestore';
+
+import { Cage, HarvestedCage, Notification, User } from '../types';
+
+// Fix: For Firebase v8, User type is available on the firebase namespace
+type FirebaseUser = firebase.User;
+
 
 // TODO: REPLACE THIS WITH YOUR FIREBASE CONFIG
 const firebaseConfig = {
-  apiKey: "AIzaSyBAl0E4wCRqLJup8vsRTc290IAxFgmIizk",
-  authDomain: "trangtraicuathinh-y.firebaseapp.com",
-  projectId: "trangtraicuathinh-y",
-  storageBucket: "trangtraicuathinh-y.firebasestorage.app",
-  messagingSenderId: "70469739033",
-  appId: "1:70469739033:web:05bf48c1372597fbdb8088"
+  apiKey: "REPLACE_WITH_YOUR_FIREBASE_API_KEY",
+  authDomain: "REPLACE_WITH_YOUR_FIREBASE_AUTH_DOMAIN",
+  projectId: "REPLACE_WITH_YOUR_FIREBASE_PROJECT_ID",
+  storageBucket: "REPLACE_WITH_YOUR_FIREBASE_STORAGE_BUCKET",
+  messagingSenderId: "REPLACE_WITH_YOUR_FIREBASE_MESSAGING_SENDER_ID",
+  appId: "REPLACE_WITH_YOUR_FIREBASE_APP_ID"
 };
 
-// Check if the config has been filled
-export const isFirebaseConfigured = firebaseConfig.projectId !== "YOUR_PROJECT_ID" && firebaseConfig.projectId !== "trangtraicuathinh-y-placeholder";
-
-
-// Initialize Firebase
-let db: any;
-if (isFirebaseConfigured) {
-    const app = initializeApp(firebaseConfig);
-    db = getFirestore(app);
+// Fix: Use Firebase v8 compatible initialization
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
 }
+const db = firebase.firestore();
+const auth = firebase.auth();
 
-// Collection references
-const cagesCollection = isFirebaseConfigured ? collection(db, 'cages') : null;
-const harvestedCollection = isFirebaseConfigured ? collection(db, 'harvestedCages') : null;
-const notificationsCollection = isFirebaseConfigured ? collection(db, 'notifications') : null;
+// --- Authentication Functions ---
+// Fix: Use Firebase v8 compatible auth methods
+export const signUpWithEmail = (email: string, password: string): Promise<FirebaseUser> => {
+    return auth.createUserWithEmailAndPassword(email, password).then(userCredential => userCredential.user as FirebaseUser);
+};
+
+export const signInWithEmail = (email: string, password: string): Promise<FirebaseUser> => {
+    return auth.signInWithEmailAndPassword(email, password).then(userCredential => userCredential.user as FirebaseUser);
+};
+
+export const signOutUser = (): Promise<void> => {
+    return auth.signOut();
+};
+
+export const onAuthStateChanged = (callback: (user: User | null) => void): (() => void) => {
+    return auth.onAuthStateChanged((firebaseUser) => {
+        if (firebaseUser) {
+            callback({ uid: firebaseUser.uid, email: firebaseUser.email });
+        } else {
+            callback(null);
+        }
+    });
+};
+
+
+// --- Firestore Collection References for Collaborative Workspace ---
+const WORKSPACE_ID = "thinh_y_farm"; // Hardcoded workspace ID for all users
+
+// Fix: Rewrote getCollection to be Firebase v8 compatible
+const getCollection = <T = firebase.firestore.DocumentData>(collectionName: string) => {
+    return db.collection('workspaces').doc(WORKSPACE_ID).collection(collectionName) as firebase.firestore.CollectionReference<T>;
+};
+
+const cagesCollection = getCollection<Cage>('cages');
+const harvestedCollection = getCollection<HarvestedCage>('harvestedCages');
+const notificationsCollection = getCollection<Notification>('notifications');
 
 
 // Real-time listeners
+// Fix: Use Firebase v8 compatible queries and listeners
 export const onCagesUpdate = (
     callback: (cages: Cage[]) => void, 
     onLoad: () => void
 ): (() => void) => {
-    if (!cagesCollection) return () => {};
-    const q = query(cagesCollection, orderBy('id'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const q = cagesCollection.orderBy('id');
+    const unsubscribe = q.onSnapshot((snapshot) => {
         const cages = snapshot.docs.map(doc => ({ ...doc.data() } as Cage));
         callback(cages);
-        onLoad(); // Signal that initial data has loaded
+        onLoad();
     }, (error) => {
         console.error("Error fetching cages: ", error);
-        onLoad(); // Also signal load on error to not get stuck on loading screen
+        onLoad();
     });
     return unsubscribe;
 };
 
 export const onHarvestedCagesUpdate = (callback: (cages: HarvestedCage[]) => void): (() => void) => {
-    if (!harvestedCollection) return () => {};
-     const q = query(harvestedCollection, orderBy('harvestDate', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+     const q = harvestedCollection.orderBy('harvestDate', 'desc');
+    const unsubscribe = q.onSnapshot((snapshot) => {
         const harvestedCages = snapshot.docs.map(doc => ({ ...doc.data() } as HarvestedCage));
         callback(harvestedCages);
     });
@@ -70,9 +92,8 @@ export const onHarvestedCagesUpdate = (callback: (cages: HarvestedCage[]) => voi
 };
 
 export const onNotificationsUpdate = (callback: (notifications: Notification[]) => void): (() => void) => {
-    if (!notificationsCollection) return () => {};
-     const q = query(notificationsCollection, orderBy('timestamp', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+     const q = notificationsCollection.orderBy('timestamp', 'desc');
+    const unsubscribe = q.onSnapshot((snapshot) => {
         const notifications = snapshot.docs.map(doc => ({ ...doc.data() } as Notification));
         callback(notifications);
     });
@@ -81,78 +102,49 @@ export const onNotificationsUpdate = (callback: (notifications: Notification[]) 
 
 
 // CRUD operations
+// Fix: Use Firebase v8 compatible CRUD operations
 export const addCageToFirebase = async (cage: Cage) => {
-    if (!cagesCollection) return;
-    const cageDocRef = doc(db, 'cages', cage.id);
-    await setDoc(cageDocRef, cage);
+    const cageDocRef = cagesCollection.doc(cage.id);
+    await cageDocRef.set(cage);
 };
 
 export const updateCageInFirebase = async (cageId: string, updates: Partial<Cage>) => {
-    if (!cagesCollection) return;
-    const cageDocRef = doc(db, 'cages', cageId);
-    await updateDoc(cageDocRef, updates);
+    const cageDocRef = cagesCollection.doc(cageId);
+    await cageDocRef.update(updates);
 };
 
 export const deleteCageFromFirebase = async (cageId: string) => {
-    if (!cagesCollection) return;
-    const cageDocRef = doc(db, 'cages', cageId);
-    await deleteDoc(cageDocRef);
+    const cageDocRef = cagesCollection.doc(cageId);
+    await cageDocRef.delete();
 };
 
 export const addHarvestedCageToFirebase = async (harvestedCage: HarvestedCage) => {
-    if (!harvestedCollection) return;
-    const harvestedDocRef = doc(db, 'harvestedCages', harvestedCage.id);
-    await setDoc(harvestedDocRef, harvestedCage);
+    const harvestedDocRef = harvestedCollection.doc(harvestedCage.id);
+    await harvestedDocRef.set(harvestedCage);
 };
 
 // Notification operations
 export const addNotificationToFirebase = async (notification: Notification) => {
-    if (!notificationsCollection) return;
-    const notificationDocRef = doc(db, 'notifications', notification.id);
-    await setDoc(notificationDocRef, notification);
+    const notificationDocRef = notificationsCollection.doc(notification.id);
+    await notificationDocRef.set(notification);
 };
 
 export const markNotificationsAsReadInFirebase = async () => {
-    if (!notificationsCollection) return;
-    const batch = writeBatch(db);
-    const q = query(notificationsCollection, where("read", "==", false));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-        snapshot.docs.forEach(doc => {
-            batch.update(doc.ref, { read: true });
-        });
-        batch.commit();
-        unsubscribe(); // Unsubscribe after the first update to avoid continuous writes
+    const batch = db.batch();
+    const q = notificationsCollection.where("read", "==", false);
+    const querySnapshot = await q.get();
+    querySnapshot.forEach(doc => {
+        batch.update(doc.ref, { read: true });
     });
+    await batch.commit();
 };
 
 export const deleteNotificationsForCageInFirebase = async (cageId: string) => {
-    if (!notificationsCollection) return;
-    const batch = writeBatch(db);
-    const q = query(notificationsCollection, where("cageId", "==", cageId));
-     const unsubscribe = onSnapshot(q, (snapshot) => {
-        snapshot.docs.forEach(doc => {
-            batch.delete(doc.ref);
-        });
-        batch.commit();
-        unsubscribe();
+    const batch = db.batch();
+    const q = notificationsCollection.where("cageId", "==", cageId);
+    const querySnapshot = await q.get();
+    querySnapshot.forEach(doc => {
+        batch.delete(doc.ref);
     });
-};
-
-// Data Migration
-export const migrateDataToFirebase = async (cages: Cage[], harvestedCages: HarvestedCage[]) => {
-    if (!cagesCollection || !harvestedCollection) return;
-    
-    const batch = writeBatch(db);
-
-    cages.forEach(cage => {
-        const cageDocRef = doc(db, 'cages', cage.id);
-        batch.set(cageDocRef, cage);
-    });
-
-    harvestedCages.forEach(hCage => {
-        const harvestedDocRef = doc(db, 'harvestedCages', hCage.id);
-        batch.set(harvestedDocRef, hCage);
-    });
-
     await batch.commit();
 };

@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI, Chat, GenerateContentResponse, Type } from "@google/genai";
 import { Cage, HarvestedCage, ReportType, AIHealthReport } from '../types';
 
@@ -16,12 +17,24 @@ const getChat = (allCages: Cage[], harvestedCages: HarvestedCage[]): Chat => {
     if (chat) {
         return chat;
     }
-    const cageSummary = allCages.map(c => ({ id: c.id, currentWeight: c.currentWeight, progress: c.progress, farmingDays: Math.round((new Date().getTime() - new Date(c.startDate).getTime()) / (1000 * 60 * 60 * 24)) }));
-    const harvestedSummary = harvestedCages.map(h => ({ id: h.id, finalWeight: h.finalWeight, profit: h.profit }));
+    const cageSummary = allCages.map(c => ({
+        id: c.id,
+        currentWeight: c.currentWeight,
+        progress: c.progress,
+        farmingDays: Math.round((new Date().getTime() - new Date(c.startDate).getTime()) / (1000 * 60 * 60 * 24)),
+        totalCost: c.costs.seed + c.costs.feed + c.costs.medicine
+    }));
+    const harvestedSummary = harvestedCages.map(h => ({
+        id: h.id,
+        finalWeight: h.finalWeight,
+        profit: h.profit,
+        revenue: h.revenue,
+        totalCost: h.totalCost,
+    }));
     
     const systemInstruction = `You are the 'Thịnh Ý AI Advisor', a proactive and comprehensive management assistant for a crab farm. Your responses must be in Vietnamese.
     Use the provided farm data to answer user questions. Be concise, insightful, and helpful.
-    IMPORTANT: Format your responses using Markdown. Use tables for comparisons (e.g., top 3 cages), bullet points for lists, and bold text for emphasis to make the output clear and visually appealing.
+    IMPORTANT: Format your responses using Markdown. Use tables for comparisons (e.g., top 3 cages), bullet points for lists, and bold text for emphasis. When presenting any monetary values (costs, revenue, profit), always format them using dots as thousand separators and add the 'VND' suffix (e.g., 25.000 VND).
     Current farm data:
     - Active Cages: ${JSON.stringify(cageSummary)}
     - Harvested Cages: ${JSON.stringify(harvestedSummary)}`;

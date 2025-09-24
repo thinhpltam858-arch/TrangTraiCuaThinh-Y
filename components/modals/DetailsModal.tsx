@@ -160,6 +160,17 @@ const DetailsModal: React.FC<DetailsModalProps> = (props) => {
     const { cage, onClose } = props;
     const [activeTab, setActiveTab] = useState<Tab>('overview');
 
+    // Add a default user to older log entries for consistent display
+    const logsWithUser = useMemo(() => {
+        return cage.log.map(entry => ({
+            ...entry,
+            meta: {
+                ...entry.meta,
+                user: entry.meta?.user || 'Hệ thống'
+            }
+        }));
+    }, [cage.log]);
+
     return (
         <Modal isOpen={true} onClose={onClose}>
             <div className="flex justify-between items-start mb-4">
@@ -186,7 +197,7 @@ const DetailsModal: React.FC<DetailsModalProps> = (props) => {
 
             <div>
                 {activeTab === 'overview' && <OverviewTab {...props} />}
-                {activeTab === 'history' && <HistoryTimeline logEntries={cage.log} />}
+                {activeTab === 'history' && <HistoryTimeline logEntries={logsWithUser} />}
                 {activeTab === 'ai' && <AITab cage={cage} />}
             </div>
         </Modal>

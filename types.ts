@@ -5,7 +5,7 @@ export interface LogEntry {
     date: string;
     type: LogEntryType;
     details: string; // e.g., "Trọng lượng mới: 250g" or "Chi phí: 15,000 VND"
-    meta?: Record<string, any>; // For extra structured data, e.g., { weight: 250, cost: 15000 }
+    meta?: Record<string, any>; // For extra structured data, e.g., { weight: 250, cost: 15000, user: 'email@example.com' }
 }
 
 export interface FeedHistoryEntry {
@@ -80,4 +80,9 @@ export interface Notification {
   cageId: string;
   timestamp: string;
   read: boolean;
+}
+
+export interface User {
+    uid: string;
+    email: string | null;
 }

@@ -1,21 +1,23 @@
 // Fix: Implement the full App.tsx component to create a functional application.
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Cage, HarvestedCage, ReportType, Theme, Notification } from './types';
+// FIX: The User type is defined in `./types`, so it should be imported from there.
+import { Cage, HarvestedCage, ReportType, Theme, Notification, User } from './types';
 import { getAIReport } from './services/geminiService';
 import { 
-    isFirebaseConfigured, 
-    onCagesUpdate,
-    onHarvestedCagesUpdate,
-    onNotificationsUpdate,
+    onCagesUpdate, 
+    onHarvestedCagesUpdate, 
+    onNotificationsUpdate, 
     addCageToFirebase,
     updateCageInFirebase,
     deleteCageFromFirebase,
     addHarvestedCageToFirebase,
-    markNotificationsAsReadInFirebase,
     addNotificationToFirebase,
     deleteNotificationsForCageInFirebase,
-    migrateDataToFirebase
+    markNotificationsAsReadInFirebase,
+    onAuthStateChanged,
+    signOutUser
 } from './services/firebaseService';
+
 
 import Header from './components/Header';
 import ReportCenter from './components/ReportCenter';
@@ -30,9 +32,7 @@ import FilterControls from './components/FilterControls';
 import LandingPage from './components/LandingPage';
 import CageStatusLegend from './components/CageStatusLegend';
 import FinancialDashboard from './components/FinancialDashboard';
-import FirebaseSetup from './components/FirebaseSetup';
-import MigrationBanner from './components/MigrationBanner';
-
+import AuthPage from './components/AuthPage';
 
 // Helper function to get days for sorting
 const getFarmingDays = (startDateString: string): number => {
@@ -40,7 +40,12 @@ const getFarmingDays = (startDateString: string): number => {
     return Math.max(1, Math.floor((new Date().getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
 };
 
-function App() {
+
+interface MainAppProps {
+    user: User;
+}
+
+const MainApp: React.FC<MainAppProps> = ({ user }) => {
     const [cages, setCages] = useState<Cage[]>([]);
     const [harvestedCages, setHarvestedCages] = useState<HarvestedCage[]>([]);
     const [theme, setTheme] = useState<Theme>('blue');
@@ -64,20 +69,6 @@ function App() {
     // Notification state
     const [notifications, setNotifications] = useState<Notification[]>([]);
 
-    // Migration State
-    const [localDataExists, setLocalDataExists] = useState(false);
-    const [migrationComplete, setMigrationComplete] = useState(false);
-
-
-    useEffect(() => {
-        // Check for local data for migration banner
-        const localCages = localStorage.getItem('crab-farm-cages');
-        const migrationDone = localStorage.getItem('firebase-migration-complete');
-        if (localCages && !migrationDone) {
-            setLocalDataExists(true);
-        }
-    }, []);
-
     // Load theme from localStorage on initial render
     useEffect(() => {
         try {
@@ -90,6 +81,19 @@ function App() {
         }
     }, []);
 
+    // Firebase Listeners
+     useEffect(() => {
+        const unsubscribeCages = onCagesUpdate(setCages, () => setIsLoading(false));
+        const unsubscribeHarvested = onHarvestedCagesUpdate(setHarvestedCages);
+        const unsubscribeNotifications = onNotificationsUpdate(setNotifications);
+
+        return () => {
+            unsubscribeCages();
+            unsubscribeHarvested();
+            unsubscribeNotifications();
+        };
+    }, []);
+
     // Save theme to localStorage whenever it changes
     useEffect(() => {
         try {
@@ -99,68 +103,39 @@ function App() {
         }
     }, [theme]);
     
-    // Set up Firebase listeners
-    useEffect(() => {
-        if (!isFirebaseConfigured) {
-            setIsLoading(false);
-            return;
-        }
-
-        const unsubCages = onCagesUpdate(setCages, () => setIsLoading(false));
-        const unsubHarvested = onHarvestedCagesUpdate(setHarvestedCages);
-        const unsubNotifications = onNotificationsUpdate(setNotifications);
-
-        return () => {
-            unsubCages();
-            unsubHarvested();
-            unsubNotifications();
-        };
-    }, []);
-
-
     // Generate notifications based on cage status
     useEffect(() => {
-        if (!isFirebaseConfigured || isLoading) return;
+        const existingNotificationCageIds = new Set(notifications.map(n => n.cageId + n.type));
+        const now = new Date().toISOString();
 
-        const processNotifications = async () => {
-            const now = new Date().toISOString();
-
-            for (const cage of cages) {
-                // Check for AI Alerts
-                if (cage.aiAlert) {
-                    const existing = notifications.some(n => n.cageId === cage.id && n.type === 'alert');
-                    if (!existing) {
-                        await addNotificationToFirebase({
-                            id: `alert-${cage.id}-${Date.now()}`,
-                            type: 'alert',
-                            message: `Lồng ${cage.id} có cảnh báo AI. Cần kiểm tra ngay!`,
-                            cageId: cage.id,
-                            timestamp: now,
-                            read: false
-                        });
-                    }
-                }
-
-                // Check for Harvest Readiness
-                if (cage.progress >= 95) {
-                    const existing = notifications.some(n => n.cageId === cage.id && n.type === 'harvest');
-                    if (!existing) {
-                        await addNotificationToFirebase({
-                            id: `harvest-${cage.id}-${Date.now()}`,
-                            type: 'harvest',
-                            message: `Lồng ${cage.id} đã sẵn sàng để thu hoạch.`,
-                            cageId: cage.id,
-                            timestamp: now,
-                            read: false
-                        });
-                    }
-                }
+        for (const cage of cages) {
+            // Check for AI Alerts
+            if (cage.aiAlert && !existingNotificationCageIds.has(cage.id + 'alert')) {
+                const newNotification: Notification = {
+                    id: `alert-${cage.id}-${Date.now()}`,
+                    type: 'alert',
+                    message: `Lồng ${cage.id} có cảnh báo AI. Cần kiểm tra ngay!`,
+                    cageId: cage.id,
+                    timestamp: now,
+                    read: false
+                };
+                addNotificationToFirebase(newNotification);
             }
-        };
 
-        processNotifications();
-
-    }, [cages, isLoading, notifications]); // Rerun when cages or loading state changes
+            // Check for Harvest Readiness
+            if (cage.progress >= 95 && !existingNotificationCageIds.has(cage.id + 'harvest')) {
+                 const newNotification: Notification = {
+                    id: `harvest-${cage.id}-${Date.now()}`,
+                    type: 'harvest',
+                    message: `Lồng ${cage.id} đã sẵn sàng để thu hoạch.`,
+                    cageId: cage.id,
+                    timestamp: now,
+                    read: false
+                };
+                addNotificationToFirebase(newNotification);
+            }
+        }
+    }, [cages, notifications]);
 
 
     // Apply theme colors as CSS variables
@@ -188,26 +163,30 @@ function App() {
         setSelectedCage(null);
     }, []);
     
-    const handleAddCage = async (newCage: Cage) => {
+    const handleAddCage = (newCage: Cage) => {
         const cageWithLog: Cage = {
             ...newCage,
             log: [{
                 date: newCage.startDate,
                 type: 'creation',
                 details: `Bắt đầu nuôi với trọng lượng ${newCage.initialWeight}g.`,
-                meta: { weight: newCage.initialWeight, cost: newCage.costs.seed }
+                meta: { weight: newCage.initialWeight, cost: newCage.costs.seed, user: user.email }
             }]
         };
-        await addCageToFirebase(cageWithLog);
+        addCageToFirebase(cageWithLog);
         handleCloseModals();
     };
 
-    const handleUpdateCage = async (updatedCage: Cage) => {
-        await updateCageInFirebase(updatedCage.id, updatedCage);
+    const handleUpdateCage = (updatedCage: Cage) => {
+        const latestLogEntry = updatedCage.log[updatedCage.log.length - 1];
+        if (latestLogEntry && !latestLogEntry.meta?.user) {
+            latestLogEntry.meta = { ...latestLogEntry.meta, user: user.email };
+        }
+        updateCageInFirebase(updatedCage.id, updatedCage);
         handleCloseModals();
     };
     
-    const handleHarvest = async (finalWeight: number, pricePerKg: number) => {
+    const handleHarvest = (finalWeight: number, pricePerKg: number) => {
         if (!selectedCage) return;
         const cageToHarvest = selectedCage;
         const totalCost = cageToHarvest.costs.seed + cageToHarvest.costs.feed + cageToHarvest.costs.medicine;
@@ -224,16 +203,16 @@ function App() {
             costs: cageToHarvest.costs,
         };
         
-        await addHarvestedCageToFirebase(newHarvestedCage);
-        await deleteCageFromFirebase(cageToHarvest.id);
-        await deleteNotificationsForCageInFirebase(cageToHarvest.id);
+        addHarvestedCageToFirebase(newHarvestedCage);
+        deleteCageFromFirebase(cageToHarvest.id);
+        deleteNotificationsForCageInFirebase(cageToHarvest.id);
         
         handleCloseModals();
     };
 
-    const handleDeleteCage = async (id: string) => {
-        await deleteCageFromFirebase(id);
-        await deleteNotificationsForCageInFirebase(id);
+    const handleDeleteCage = (id: string) => {
+        deleteCageFromFirebase(id);
+        deleteNotificationsForCageInFirebase(id);
         handleCloseModals();
     };
 
@@ -246,14 +225,14 @@ function App() {
         });
     };
 
-    const handleBulkFeed = async () => {
+    const handleBulkFeed = () => {
         const now = new Date().toISOString();
         const feedCost = 15000; // Example cost
         
-        const updates: Promise<void>[] = [];
-        cages.forEach(cage => {
-            if (selectedCages.has(cage.id)) {
-                const newFeedEntry = {
+        selectedCages.forEach(cageId => {
+            const cage = cages.find(c => c.id === cageId);
+            if (cage) {
+                 const newFeedEntry = {
                     date: now,
                     feedType: 'Thức ăn tổng hợp (hàng loạt)',
                     weight: 100, // Example weight
@@ -262,14 +241,13 @@ function App() {
                 const updatedCage = {
                     ...cage,
                     costs: { ...cage.costs, feed: cage.costs.feed + feedCost },
-                    log: [...cage.log, { date: now, type: 'feeding' as const, details: `Đã cho ăn hàng loạt. Chi phí ${feedCost.toLocaleString('vi-VN')} VND.`, meta: { cost: feedCost, weight: 100 } }],
+                    log: [...cage.log, { date: now, type: 'feeding' as const, details: `Đã cho ăn hàng loạt. Chi phí ${feedCost.toLocaleString('vi-VN')} VND.`, meta: { cost: feedCost, weight: 100, user: user.email } }],
                     feedHistory: [...cage.feedHistory, newFeedEntry]
                 };
-                updates.push(updateCageInFirebase(cage.id, updatedCage));
+                updateCageInFirebase(cageId, updatedCage);
             }
         });
 
-        await Promise.all(updates);
         setSelectedCages(new Set());
     };
 
@@ -281,31 +259,16 @@ function App() {
         setIsReportLoading(false);
     };
 
-    const handleMarkNotificationsAsRead = useCallback(async () => {
-        await markNotificationsAsReadInFirebase();
+    const handleMarkNotificationsAsRead = useCallback(() => {
+        markNotificationsAsReadInFirebase();
     }, []);
 
-    const handleRunMigration = async () => {
-        if (!window.confirm("Bạn có chắc chắn muốn chuyển dữ liệu từ máy này lên đám mây không? Hành động này không thể hoàn tác.")) {
-            return;
-        }
+    const handleSignOut = async () => {
         try {
-            const localCagesJSON = localStorage.getItem('crab-farm-cages');
-            const localHarvestedJSON = localStorage.getItem('crab-farm-harvested');
-            
-            const localCages = localCagesJSON ? JSON.parse(localCagesJSON) : [];
-            const localHarvested = localHarvestedJSON ? JSON.parse(localHarvestedJSON) : [];
-
-            await migrateDataToFirebase(localCages, localHarvested);
-
-            localStorage.setItem('firebase-migration-complete', 'true');
-            setLocalDataExists(false); // Hide banner
-            setMigrationComplete(true); // Optional: show success message
-            alert("Chuyển dữ liệu thành công! Dữ liệu của bạn giờ đã an toàn trên đám mây.");
-            window.location.reload(); // Reload to fetch fresh data from Firebase
+            await signOutUser();
+            // App component will handle rerendering to AuthPage
         } catch (error) {
-            console.error("Migration failed: ", error);
-            alert("Đã có lỗi xảy ra trong quá trình chuyển đổi. Vui lòng thử lại.");
+            console.error("Error signing out: ", error);
         }
     };
     
@@ -323,10 +286,6 @@ function App() {
         }
         return processedCages;
     }, [cages, searchTerm, sortKey]);
-
-    if (!isFirebaseConfigured) {
-        return <FirebaseSetup />;
-    }
 
     if (!appEntered) {
         return <LandingPage onEnter={() => setAppEntered(true)} />;
@@ -346,7 +305,6 @@ function App() {
     return (
         <div className="bg-gray-50 min-h-screen font-sans">
             <div className="container mx-auto p-4 sm:p-6">
-                {localDataExists && <MigrationBanner onMigrate={handleRunMigration} />}
                 <Header 
                     onAddCage={() => setActiveModal('add')} 
                     theme={theme} 
@@ -355,6 +313,8 @@ function App() {
                     onMarkAsRead={handleMarkNotificationsAsRead}
                     currentView={currentView}
                     onNavigate={setCurrentView}
+                    user={user}
+                    onSignOut={handleSignOut}
                 />
                 
                 {currentView === 'cages' && (
@@ -412,9 +372,8 @@ function App() {
             )}
         </div>
     );
-}
+};
 
-// A simple AddCageModal needs to be defined for the app to compile
 const AddCageModal: React.FC<{onClose: () => void; onSave: (cage: Cage) => void; existingIds: string[]}> = ({onClose, onSave, existingIds}) => {
     const [id, setId] = useState('');
     const [weight, setWeight] = useState('');
@@ -473,6 +432,37 @@ const AddCageModal: React.FC<{onClose: () => void; onSave: (cage: Cage) => void;
             </div>
         </div>
     )
+};
+
+
+function App() {
+    const [user, setUser] = useState<User | null>(null);
+    const [authLoading, setAuthLoading] = useState(true);
+
+    useEffect(() => {
+        const unsubscribe = onAuthStateChanged((firebaseUser) => {
+            setUser(firebaseUser);
+            setAuthLoading(false);
+        });
+        return () => unsubscribe();
+    }, []);
+
+    if (authLoading) {
+         return (
+            <div className="flex justify-center items-center min-h-screen bg-gray-50">
+                <div className="flex flex-col items-center">
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary-500"></div>
+                    <p className="mt-4 text-gray-600">Đang kiểm tra phiên đăng nhập...</p>
+                </div>
+            </div>
+        );
+    }
+    
+    if (!user) {
+        return <AuthPage />;
+    }
+
+    return <MainApp user={user} />;
 }
 
 export default App;

@@ -44,10 +44,15 @@ const TimelineItem: React.FC<{ entry: LogEntry; isLast: boolean }> = ({ entry, i
                 </div>
                 {!isLast && <div className="w-px h-full bg-gray-300"></div>}
             </div>
-            <div className="pb-8">
-                <p className="mb-1 text-sm font-semibold text-gray-600">
-                    {new Date(date).toLocaleString('vi-VN', { dateStyle: 'medium', timeStyle: 'short' })}
-                </p>
+            <div className="pb-8 flex-grow">
+                 <div className="flex justify-between items-baseline">
+                    <p className="mb-1 text-sm font-semibold text-gray-600">
+                        {new Date(date).toLocaleString('vi-VN', { dateStyle: 'medium', timeStyle: 'short' })}
+                    </p>
+                    {meta?.user && (
+                         <p className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{meta.user}</p>
+                    )}
+                </div>
                 <p className="text-gray-800 font-medium">{details}</p>
                  {meta?.cost && <p className="text-xs text-red-600">Chi phí: {meta.cost.toLocaleString('vi-VN')} VND</p>}
             </div>
